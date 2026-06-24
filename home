@@ -1,0 +1,149 @@
+import customtkinter as ctk
+from datetime import datetime
+import tkinter.messagebox as messagebox
+from database import ActivityLog
+
+class HomeView(ctk.CTkFrame):
+    def __init__(self, master, db_engine):
+        super().__init__(master)
+        self.db = db_engine
+
+        # --- 區塊一：分頁切換欄 ---
+        self.tabview = ctk.CTkTabview(self, width=500, height=280)
+        self.tabview.pack(pady=10)
+        
+        self.tabview.add("紀錄跑步")
+        self.tabview.add("衝動防禦")
+
+        self.setup_run_tab()
+        self.setup_urge_tab()
+
+        # --- 區塊二：歷史紀錄文字區 ---
+        self.log_display_label = ctk.CTkLabel(self, text="📊 歷史修練日誌 (最新紀錄在最上方)", font=ctk.CTkFont(size=14, weight="bold"))
+        self.log_display_label.pack(pady=(15, 5))
+
+        self.textbox = ctk.CTkTextbox(self, width=500, height=220, font=ctk.CTkFont(size=13))
+        self.textbox.pack(pady=5)
+
+        # --- 區塊三：舊數據管理面板 ---
+        self.del_frame = ctk.CTkFrame(self, width=500, height=60)
+        self.del_frame.pack(pady=15, padx=50, fill="x")
+        self.del_frame.pack_propagate(False) 
+
+        self.del_label = ctk.CTkLabel(self.del_frame, text="🗑️ 日誌編號：", font=ctk.CTkFont(size=12, weight="bold"))
+        self.del_label.pack(side="left", padx=(15, 5), pady=15)
+
+        self.del_index_entry = ctk.CTkEntry(self.del_frame, placeholder_text="輸入編號 (如: 0)", width=160)
+        self.del_index_entry.pack(side="left", padx=5, pady=15)
+
+        self.del_confirm_btn = ctk.CTkButton(
+            self.del_frame, 
+            text="精準刪除", 
+            fg_color="#D32F2F", 
+            hover_color="#B71C1C",
+            width=120,
+            font=ctk.CTkFont(weight="bold"),
+            command=self.delete_selected_log
+        )
+        self.del_confirm_btn.pack(side="left", padx=(10, 15), pady=15)
+
+        self.refresh_display()
+
+    def setup_run_tab(self):
+        tab = self.tabview.tab("紀錄跑步")
+        self.dist_entry = ctk.CTkEntry(tab, placeholder_text="跑步里程 (km)", width=250)
+        self.dist_entry.pack(pady=8)
+        self.hr_entry = ctk.CTkEntry(tab, placeholder_text="平均心率 (bpm)", width=250)
+        self.hr_entry.pack(pady=8)
+        self.dur_entry = ctk.CTkEntry(tab, placeholder_text="Zone 2 時間 (分鐘)", width=250)
+        self.dur_entry.pack(pady=8)
+        
+        btn = ctk.CTkButton(tab, text="儲存跑步數據", width=180, font=ctk.CTkFont(weight="bold"), command=self.save_run_log)
+        btn.pack(pady=12)
+
+    def setup_urge_tab(self):
+        tab = self.tabview.tab("衝動防禦")
+        self.status_var = ctk.StringVar(value="y")
+        
+        # 這裡移除了那行沒有 .pack() 且 value 壞掉的重複按鈕，保持乾淨
+        ctk.CTkRadioButton(tab, text="✅ 成功頂住", variable=self.status_var, value="y").pack(pady=8)
+        ctk.CTkRadioButton(tab, text="❌ 失敗失控", variable=self.status_var, value="n").pack(pady=8)
+        
+        self.urge_note = ctk.CTkEntry(tab, placeholder_text="寫下當下的想法...", width=250)
+        self.urge_note.pack(pady=8)
+        
+        btn = ctk.CTkButton(tab, text="紀錄防禦狀態", fg_color="green", hover_color="darkgreen", width=180, font=ctk.CTkFont(weight="bold"), command=self.save_urge_log)
+        btn.pack(pady=12)
+
+    def save_run_log(self):
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            new_run = ActivityLog(
+                timestamp=now_str, log_type="RUN",
+                distance=float(self.dist_entry.get() or 0),
+                avg_hr=int(self.hr_entry.get() or 0),
+                duration=int(self.dur_entry.get() or 0), note="自主跑訓"
+            )
+            self.db.logs.insert(0, new_run)
+            self.db.save_data()
+            self.refresh_display()
+            self.dist_entry.delete(0, 'end')
+            self.hr_entry.delete(0, 'end')
+            self.dur_entry.delete(0, 'end')
+        except ValueError:
+            messagebox.showerror("錯誤", "請輸入正確的數字數據！")
+
+    def save_urge_log(self):
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        new_urge = ActivityLog(
+            timestamp=now_str, log_type="URGE", urge_count=1,
+            pulse_checked=(self.status_var.get() == "y"), note=self.urge_note.get()
+        )
+        self.db.logs.insert(0, new_urge)
+        self.db.save_data()
+        self.refresh_display()
+        self.urge_note.delete(0, 'end')
+
+    def delete_selected_log(self):
+        input_val = self.del_index_entry.get().strip()
+        if not input_val:
+            messagebox.showwarning("提示", "請先輸入想要刪除的日誌編號！")
+            return
+        try:
+            idx = int(input_val)
+            if 0 <= idx < len(self.db.logs):
+                target = self.db.logs[idx]
+                info = f"跑步 ({target.distance} km)" if target.log_type == "RUN" else "多巴胺防禦"
+                confirm = messagebox.askyesno("確認刪除", f"你確定要刪除該筆舊數據嗎？\n【編號 {idx}】時間: {target.timestamp}\n內容: {info}")
+                if confirm:
+                    self.db.logs.pop(idx)
+                    self.db.save_data()
+                    self.refresh_display()
+                    self.del_index_entry.delete(0, 'end')
+                    messagebox.showinfo("成功", f"編號 {idx} 的舊紀錄已刪除！")
+            else:
+                messagebox.showerror("錯誤", f"找不到編號 {idx}。")
+        except ValueError:
+            messagebox.showerror("錯誤", "請輸入正確的數字編號！")
+
+    def refresh_display(self):
+        self.textbox.configure(state="normal")
+        self.textbox.delete("1.0", "end")
+        display_text = ""
+        
+        for idx, log in enumerate(self.db.logs):
+            display_text += f"【編號 {idx}】⏰ 時間: {log.timestamp}\n"
+            if log.log_type == "RUN":
+                display_text += f"  👟 【跑步紀錄】里程: {log.distance} km | 時間: {log.duration} 分鐘 | 心率: {log.avg_hr} bpm\n"
+            elif log.log_type == "URGE":
+                display_text += f"  🛡️ 【多巴胺防禦】狀態: {'✅ 成功壓制' if log.pulse_checked else '❌ 失敗失控'}\n"
+            if log.note: 
+                display_text += f"  📝 備註: {log.note}\n"
+            display_text += "-" * 50 + "\n"
+        
+        if not display_text:
+            self.textbox.insert("0.0", "目前尚無 any 自律紀錄，開始修練吧！")
+        else:
+            self.textbox.insert("0.0", display_text)
+            
+        self.textbox.configure(state="disabled")
