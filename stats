@@ -1,0 +1,10 @@
+import customtkinter as ctk
+
+class StatsView(ctk.CTkFrame):
+    def __init__(self, master, db_engine):
+        super().__init__(master)
+        self.db = db_engine
+
+        # 這裡未來可以放數據分析、長跑週報表、或是多巴胺戒斷統計圖
+        self.label = ctk.CTkLabel(self, text="📊 數據統計分析頁面\n(暑假第二階段：演算法與圖表功能開發留駐區)", font=ctk.CTkFont(size=16))
+        self.label.pack(pady=100)
